@@ -2,8 +2,11 @@ import fs from "fs";
 import path from "path";
 import type { DocumentStore, ChatHistory } from "@/types";
 
-// All JSON files live in ./data/ at the project root
-const DATA_DIR = path.join(process.cwd(), "data");
+// Vercel's deployment filesystem is read-only — only /tmp is writable.
+// Locally we use ./data/ so you can inspect the files during development.
+const DATA_DIR = process.env.VERCEL
+  ? "/tmp/chat-data"
+  : path.join(process.cwd(), "data");
 const DOCUMENTS_FILE = path.join(DATA_DIR, "documents.json");
 const HISTORY_FILE = path.join(DATA_DIR, "history.json");
 
