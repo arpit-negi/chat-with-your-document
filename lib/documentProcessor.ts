@@ -4,8 +4,10 @@ import type { StoredDocument, DocumentChunk } from "@/types";
 // --- Text Extraction ---
 
 async function extractFromPdf(buffer: Buffer): Promise<string> {
+  // Import from the internal lib path to skip pdf-parse's self-test
+  // which tries to read test/version.pdf — a file not bundled on Vercel
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const pdfParse = require("pdf-parse") as (buf: Buffer) => Promise<{ text: string }>;
+  const pdfParse = require("pdf-parse/lib/pdf-parse.js") as (buf: Buffer) => Promise<{ text: string }>;
   const result = await pdfParse(buffer);
   return result.text;
 }
