@@ -1,12 +1,11 @@
 // A single chunk of text from a document, plus its embedding vector
 export interface DocumentChunk {
-  id: string;           // unique id for this chunk
-  text: string;         // the raw text content
-  embedding: number[];  // 384-dimensional vector from all-MiniLM-L6-v2
+  id: string;
+  text: string;
   metadata: {
-    filename: string;   // which file this came from
-    docId: string;      // parent document id
-    chunkIndex: number; // position in the document
+    filename: string;
+    docId: string;
+    chunkIndex: number;
   };
 }
 

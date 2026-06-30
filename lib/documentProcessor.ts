@@ -1,12 +1,9 @@
-import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
 import { v4 as uuid } from "uuid";
 import type { StoredDocument, DocumentChunk } from "@/types";
 
 // --- Text Extraction ---
-// Each function takes the raw file buffer and returns plain text.
 
 async function extractFromPdf(buffer: Buffer): Promise<string> {
-  // pdf-parse v1 is a plain CJS function — require() is the reliable way to load it
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const pdfParse = require("pdf-parse") as (buf: Buffer) => Promise<{ text: string }>;
   const result = await pdfParse(buffer);
@@ -23,10 +20,7 @@ function extractFromTxt(buffer: Buffer): string {
   return buffer.toString("utf-8");
 }
 
-export async function extractText(
-  buffer: Buffer,
-  filename: string
-): Promise<string> {
+export async function extractText(buffer: Buffer, filename: string): Promise<string> {
   const ext = filename.split(".").pop()?.toLowerCase();
   if (ext === "pdf") return extractFromPdf(buffer);
   if (ext === "docx") return extractFromDocx(buffer);
@@ -35,70 +29,55 @@ export async function extractText(
 }
 
 // --- Chunking ---
-// Split long text into overlapping pieces so the LLM gets focused context.
-// chunkSize=500 chars keeps chunks small enough for the embedding model.
-// chunkOverlap=50 prevents sentences from being cut at chunk boundaries.
+// Splits text into overlapping windows. Tries to break at sentence/paragraph
+// boundaries so chunks don't cut off mid-sentence.
 
-async function splitIntoChunks(text: string): Promise<string[]> {
-  const splitter = new RecursiveCharacterTextSplitter({
-    chunkSize: 500,
-    chunkOverlap: 50,
-  });
-  const docs = await splitter.createDocuments([text]);
-  return docs.map((d) => d.pageContent);
-}
+function splitIntoChunks(text: string, chunkSize = 600, overlap = 80): string[] {
+  const chunks: string[] = [];
+  // Normalise whitespace
+  const clean = text.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  let start = 0;
 
-// --- Embedding ---
-// Uses @huggingface/transformers (successor to @xenova/transformers).
-// Forces WASM backend so it works on Vercel (no native libonnxruntime needed).
+  while (start < clean.length) {
+    let end = Math.min(start + chunkSize, clean.length);
 
-async function generateEmbeddings(texts: string[]): Promise<number[][]> {
-  const { pipeline, env } = await import("@huggingface/transformers");
+    // Try to break at a natural boundary (paragraph, sentence, word)
+    if (end < clean.length) {
+      const slice = clean.slice(start, end);
+      const lastPara = slice.lastIndexOf("\n\n");
+      const lastSentence = Math.max(slice.lastIndexOf(". "), slice.lastIndexOf("! "), slice.lastIndexOf("? "));
+      const lastSpace = slice.lastIndexOf(" ");
+      const breakAt = lastPara > chunkSize * 0.5
+        ? lastPara
+        : lastSentence > chunkSize * 0.4
+          ? lastSentence + 1
+          : lastSpace > 0 ? lastSpace : end;
+      end = start + breakAt;
+    }
 
-  // Force single-threaded WASM — required for Vercel's serverless environment
-  // which doesn't have the native ONNX shared library (libonnxruntime.so)
-  if (env.backends.onnx.wasm) env.backends.onnx.wasm.numThreads = 1;
+    const chunk = clean.slice(start, end).trim();
+    if (chunk.length > 20) chunks.push(chunk);
 
-  const embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
-
-  const embeddings: number[][] = [];
-  for (const text of texts) {
-    const output = await embedder(text, { pooling: "mean", normalize: true });
-    embeddings.push(Array.from(output.data as Float32Array));
+    start = end - overlap;
   }
-  return embeddings;
+
+  return chunks;
 }
 
 // --- Main pipeline ---
-// Combines extraction + chunking + embedding into one StoredDocument.
+// No embedding step — BM25 similarity is computed at query time from raw text.
 
-export async function processDocument(
-  buffer: Buffer,
-  filename: string
-): Promise<StoredDocument> {
-  // Step 1: Extract raw text from the file
+export async function processDocument(buffer: Buffer, filename: string): Promise<StoredDocument> {
   const text = await extractText(buffer, filename);
-
-  // Step 2: Split text into overlapping chunks
-  const chunkTexts = await splitIntoChunks(text);
+  const chunkTexts = splitIntoChunks(text);
   console.log(`[processor] ${filename}: ${chunkTexts.length} chunks`);
 
-  // Step 3: Embed every chunk — this is the "encode into vector space" step
-  const embeddings = await generateEmbeddings(chunkTexts);
-
-  // Step 4: Pack everything into typed objects
   const docId = uuid();
   const chunks: DocumentChunk[] = chunkTexts.map((chunkText, i) => ({
     id: uuid(),
     text: chunkText,
-    embedding: embeddings[i],
     metadata: { filename, docId, chunkIndex: i },
   }));
 
-  return {
-    id: docId,
-    filename,
-    uploadedAt: new Date().toISOString(),
-    chunks,
-  };
+  return { id: docId, filename, uploadedAt: new Date().toISOString(), chunks };
 }
