@@ -18,7 +18,8 @@ function cosineSimilarity(a: number[], b: number[]): number {
 // It's critical to use the SAME model — vectors only compare correctly
 // when they live in the same embedding space.
 async function embedQuery(query: string): Promise<number[]> {
-  const { pipeline } = await import("@xenova/transformers");
+  const { pipeline, env } = await import("@huggingface/transformers");
+  if (env.backends.onnx.wasm) env.backends.onnx.wasm.numThreads = 1;
   const embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
   const output = await embedder(query, { pooling: "mean", normalize: true });
   return Array.from(output.data as Float32Array);

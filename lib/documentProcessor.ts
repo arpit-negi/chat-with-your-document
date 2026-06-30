@@ -49,19 +49,21 @@ async function splitIntoChunks(text: string): Promise<string[]> {
 }
 
 // --- Embedding ---
-// We use Xenova/all-MiniLM-L6-v2 running locally via Transformers.js.
-// It produces a 384-dimensional float32 vector for each input string.
-// The first call downloads the model (~25MB) and caches it locally.
+// Uses @huggingface/transformers (successor to @xenova/transformers).
+// Forces WASM backend so it works on Vercel (no native libonnxruntime needed).
 
 async function generateEmbeddings(texts: string[]): Promise<number[][]> {
-  // Dynamic import avoids server-side bundling issues with Transformers.js
-  const { pipeline } = await import("@xenova/transformers");
+  const { pipeline, env } = await import("@huggingface/transformers");
+
+  // Force single-threaded WASM — required for Vercel's serverless environment
+  // which doesn't have the native ONNX shared library (libonnxruntime.so)
+  if (env.backends.onnx.wasm) env.backends.onnx.wasm.numThreads = 1;
+
   const embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
 
   const embeddings: number[][] = [];
   for (const text of texts) {
     const output = await embedder(text, { pooling: "mean", normalize: true });
-    // output.data is a Float32Array; convert to plain number[] for JSON storage
     embeddings.push(Array.from(output.data as Float32Array));
   }
   return embeddings;
