@@ -5,7 +5,7 @@ import { readChatHistory, writeChatHistory } from "@/lib/storage";
 import { v4 as uuid } from "uuid";
 import type { ChatRequest, ChatMessage } from "@/types";
 
-export const maxDuration = 60;
+export const maxDuration = 10;
 
 export async function POST(request: NextRequest) {
   try {

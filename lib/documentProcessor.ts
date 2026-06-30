@@ -4,12 +4,23 @@ import type { StoredDocument, DocumentChunk } from "@/types";
 // --- Text Extraction ---
 
 async function extractFromPdf(buffer: Buffer): Promise<string> {
-  // Import from the internal lib path to skip pdf-parse's self-test
-  // which tries to read test/version.pdf — a file not bundled on Vercel
+  // pdfjs-dist is pure JavaScript — no native binaries, works on Vercel
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const pdfParse = require("pdf-parse/lib/pdf-parse.js") as (buf: Buffer) => Promise<{ text: string }>;
-  const result = await pdfParse(buffer);
-  return result.text;
+  const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
+
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pdf: any = await loadingTask.promise;
+
+  const pages: string[] = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = content.items.map((item: any) => item.str ?? "").join(" ");
+    pages.push(text);
+  }
+  return pages.join("\n");
 }
 
 async function extractFromDocx(buffer: Buffer): Promise<string> {

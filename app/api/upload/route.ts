@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { processDocument } from "@/lib/documentProcessor";
 import { readDocumentStore, writeDocumentStore } from "@/lib/storage";
 
-export const maxDuration = 60;
+export const maxDuration = 10;
 
 export async function POST(request: NextRequest) {
   try {
