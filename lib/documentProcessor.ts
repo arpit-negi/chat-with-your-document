@@ -1,3 +1,4 @@
+import path from "path";
 import { v4 as uuid } from "uuid";
 import type { StoredDocument, DocumentChunk } from "@/types";
 
@@ -26,11 +27,12 @@ async function extractFromPdf(buffer: Buffer): Promise<string> {
   const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
 
   // Point pdfjs to its bundled worker file so it can spawn a worker_thread.
-  // Only set once — the module is cached across warm invocations.
+  // Must be a plain filesystem string — require.resolve() returns a numeric
+  // module ID in Turbopack/webpack bundles, which breaks workerSrc.endsWith().
   if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    pdfjsLib.GlobalWorkerOptions.workerSrc = require.resolve(
-      "pdfjs-dist/legacy/build/pdf.worker.js"
+    pdfjsLib.GlobalWorkerOptions.workerSrc = path.join(
+      process.cwd(),
+      "node_modules/pdfjs-dist/legacy/build/pdf.worker.js"
     );
   }
 
