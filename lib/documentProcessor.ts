@@ -1,54 +1,28 @@
-import path from "path";
 import { v4 as uuid } from "uuid";
 import type { StoredDocument, DocumentChunk } from "@/types";
 
 // --- Text Extraction ---
 
 async function extractFromPdf(buffer: Buffer): Promise<string> {
-  // pdfjs-dist needs two things to work in Node.js serverless:
-  //
-  // 1. DOMMatrix polyfill — Vercel has no browser DOM. pdfjs tries to get
-  //    DOMMatrix from the `canvas` npm package (which isn't on Vercel), warns,
-  //    then leaves DOMMatrix undefined. Text transform calls then throw/hang.
-  //
-  // 2. workerSrc — pdfjs dispatches all PDF operations to a worker thread.
-  //    Without this path, getDocument().promise hangs forever waiting for a
-  //    worker that never starts. This is the primary cause of the 504 timeout.
-  if (typeof (globalThis as Record<string, unknown>).DOMMatrix === "undefined") {
-    (globalThis as Record<string, unknown>).DOMMatrix = class {
-      a = 1; b = 0; c = 0; d = 1; e = 0; f = 0;
-      constructor(_init?: unknown) {}
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      transformPoint(p: any) { return p || { x: 0, y: 0, z: 0, w: 1 }; }
-    };
-  }
-
+  // pdf2json: pure JavaScript PDF parser, no canvas/DOM/worker dependencies.
+  // pdfjs-dist was abandoned — it initialises its entire rendering pipeline
+  // on startup (needing DOMMatrix, Path2D, canvas…) even for text-only reads,
+  // which hangs indefinitely on Vercel's serverless Node.js environment.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
-
-  // Point pdfjs to its bundled worker file so it can spawn a worker_thread.
-  // Must be a plain filesystem string — require.resolve() returns a numeric
-  // module ID in Turbopack/webpack bundles, which breaks workerSrc.endsWith().
-  if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = path.join(
-      process.cwd(),
-      "node_modules/pdfjs-dist/legacy/build/pdf.worker.js"
-    );
-  }
-
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const pdf: any = await loadingTask.promise;
-
-  const pages: string[] = [];
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const text = content.items.map((item: any) => item.str ?? "").join(" ");
-    pages.push(text);
-  }
-  return pages.join("\n");
+  const PDFParser = require("pdf2json");
+  return new Promise((resolve, reject) => {
+    const parser = new PDFParser(null, 1);
+    parser.on("pdfParser_dataError", (err: { parserError: Error }) => {
+      reject(err.parserError);
+    });
+    parser.on("pdfParser_dataReady", () => {
+      // Decode URI-encoded text that pdf2json produces
+      const raw: string = parser.getRawTextContent();
+      const text = decodeURIComponent(raw);
+      resolve(text);
+    });
+    parser.parseBuffer(buffer);
+  });
 }
 
 async function extractFromDocx(buffer: Buffer): Promise<string> {
