@@ -4,9 +4,35 @@ import type { StoredDocument, DocumentChunk } from "@/types";
 // --- Text Extraction ---
 
 async function extractFromPdf(buffer: Buffer): Promise<string> {
-  // pdfjs-dist is pure JavaScript — no native binaries, works on Vercel
+  // pdfjs-dist needs two things to work in Node.js serverless:
+  //
+  // 1. DOMMatrix polyfill — Vercel has no browser DOM. pdfjs tries to get
+  //    DOMMatrix from the `canvas` npm package (which isn't on Vercel), warns,
+  //    then leaves DOMMatrix undefined. Text transform calls then throw/hang.
+  //
+  // 2. workerSrc — pdfjs dispatches all PDF operations to a worker thread.
+  //    Without this path, getDocument().promise hangs forever waiting for a
+  //    worker that never starts. This is the primary cause of the 504 timeout.
+  if (typeof (globalThis as Record<string, unknown>).DOMMatrix === "undefined") {
+    (globalThis as Record<string, unknown>).DOMMatrix = class {
+      a = 1; b = 0; c = 0; d = 1; e = 0; f = 0;
+      constructor(_init?: unknown) {}
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      transformPoint(p: any) { return p || { x: 0, y: 0, z: 0, w: 1 }; }
+    };
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
+
+  // Point pdfjs to its bundled worker file so it can spawn a worker_thread.
+  // Only set once — the module is cached across warm invocations.
+  if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    pdfjsLib.GlobalWorkerOptions.workerSrc = require.resolve(
+      "pdfjs-dist/legacy/build/pdf.worker.js"
+    );
+  }
 
   const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
